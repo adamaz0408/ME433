@@ -3,10 +3,37 @@
 #include "hardware/i2c.h"
 #include "hardware/adc.h"
 #include "ssd1306.h"
+#include "font.h"
 
 #define I2C_SDA_PIN 4
 #define I2C_SCL_PIN 5
 #define HEARTBEAT_PIN 14 
+
+// draw single char from font.h matrix
+void drawChar(int x, int y, char c) {
+    // only process printable ASCII chars
+    if (c < ' ' || c > '~') {
+        return; 
+    }
+
+    // offset ASCII value by 32 to find array index
+    int font_index = c - ' ';
+
+    // loop through 5 vertical columns of char
+    for (int col = 0; col < 5; col++) {
+        // grab byte representing specific col
+        char column_data = ASCII[font_index][col];
+
+        // loop through 8 vertical pixels in col
+        for (int row = 0; row < 8; row++) {
+            // check if bit at row pos is 1
+            bool pixel_state = (column_data & (1 << row)) != 0;
+            
+            // draw pixel offset from x and y coord
+            ssd1306_drawPixel(x + col, y + row, pixel_state);
+        }
+    }
+}
 
 int main() {
     stdio_init_all();
@@ -31,7 +58,11 @@ int main() {
     // initialize SSD1306 OLED
     ssd1306_setup();
     ssd1306_clear(); // ensure buffer starts completely empty
-    ssd1306_update(); // push empty buffer to clear any static on screen
+
+    // draw "ME" onscreen
+    drawChar(10, 10, 'M');
+    drawChar(16, 10, 'E');
+    ssd1306_update(); // push buffer to clear any static on screen
 
     bool toggle_state = false;
 
