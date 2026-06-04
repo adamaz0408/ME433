@@ -35,6 +35,27 @@ void drawChar(int x, int y, char c) {
     }
 }
 
+// print full string of chars
+void drawMessage(int x, int y, char *message) {
+    int i = 0;
+    
+    // loop through char array until reached null terminator
+    while (message[i] != '\0') {
+        drawChar(x, y, message[i]);
+        
+        // move cursor to right by 6 pixels
+        x += 6;
+        
+        // screen wraparound logic
+        if (x > (128 - 5)) {
+            x = 0;
+            y += 8;
+        }
+        
+        i++;
+    }
+}
+
 int main() {
     stdio_init_all();
 
@@ -57,29 +78,50 @@ int main() {
 
     // initialize SSD1306 OLED
     ssd1306_setup();
-    ssd1306_clear(); // ensure buffer starts completely empty
 
-    // draw "ME" onscreen
-    drawChar(10, 10, 'M');
-    drawChar(16, 10, 'E');
-    ssd1306_update(); // push buffer to clear any static on screen
-
+    // loop variables
     bool toggle_state = false;
+    uint32_t start_time, end_time;
+    float fps = 0.0f; // initialize to 0 for first frame
+    uint32_t last_blink_time = to_us_since_boot(get_absolute_time());
 
-    // 1Hz Execution Loop
     while (1) {
-        // toggle state variable
-        toggle_state = !toggle_state;
+        // record start time (ms)
+        start_time = to_us_since_boot(get_absolute_time());
 
-        // apply state to heartbeat LED
-        gpio_put(HEARTBEAT_PIN, toggle_state);
+        ssd1306_clear(); // ensure buffer starts completely empty
 
-        // apply state to single pixel in center of screen
-        ssd1306_drawPixel(64, 16, toggle_state);
-        
-        // push updated buffer over I2C to display
+        // read ADC and calc real voltage
+        uint16_t adc_raw = adc_read();
+        float voltage = (adc_raw * 3.3f) / 4095.0f;
+
+        // draw "HELLO WORLD!" onscreen
+        char hello_msg[50];
+        sprintf(hello_msg, "HELLO WORLD!");
+        drawMessage(28, 0, hello_msg);
+
+        // draw live voltage in middle
+        char adc_msg[50];
+        sprintf(adc_msg, "ADC0: %.2f V", voltage);
+        drawMessage(0, 12, adc_msg); 
+
+        // draw FPS at bottom
+        char fps_msg[50];
+        sprintf(fps_msg, "FPS: %.1f", fps);
+        drawMessage(0, 24, fps_msg); 
+
+        // push completely built frame to display
         ssd1306_update();
+        
+        // calc how long frame took to gen FPS for next loop
+        end_time = to_us_since_boot(get_absolute_time());
+        fps = 1000000.0f / (end_time - start_time);
 
-        sleep_ms(500);
+        // heartbeat logic
+        if (to_us_since_boot(get_absolute_time()) - last_blink_time > 500000) {
+            toggle_state = !toggle_state;
+            gpio_put(HEARTBEAT_PIN, toggle_state);
+            last_blink_time = to_us_since_boot(get_absolute_time()); // Reset the timer
+            }
     }
 }
