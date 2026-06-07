@@ -38,22 +38,39 @@ frq = frq[range(int(num_points / 2))]
 Y = np.fft.fft(signal) / num_points
 Y = Y[range(int(num_points / 2))]
 
+# moving average filter (MAF) implementation
+X = 15 # window size (guess aand check value for each CSV)
+maf_signal = np.zeros(num_points)
+
+# MAF loop
+for i in range(X - 1, num_points):
+    # slice last X elements and average them
+    maf_signal[i] = np.mean(signal[i - X + 1 : i + 1])
+
+# calc FFT for new filtered signal
+Y_maf = np.fft.fft(maf_signal) / num_points
+Y_maf = Y_maf[range(int(num_points / 2))]
+
 # plotting both subplots
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
 # signal v time plot
-ax1.plot(t, signal, 'k')
+ax1.plot(t, signal, 'k', label='Unfiltered Signal')
+ax1.plot(t, maf_signal, 'r', label='Filtered Signal')
 ax1.set_xlabel('Time [s]')
 ax1.set_ylabel('Amplitude')
-ax1.set_title(f'Raw Signal vs Time ({filename})')
+ax1.set_title(f'MAF Filter ({filename}) - Window: {X}')
+ax1.legend()
 ax1.grid(True)
 
 # FFT plot
-ax2.plot(frq, abs(Y), 'b') 
+ax2.plot(frq, abs(Y), 'k', label='Unfiltered FFT') 
+ax2.plot(frq, abs(Y_maf), 'r', label='Filtered FFT')
 ax2.set_xlabel('Freq (Hz)')
 ax2.set_ylabel('|Y(freq)|')
-ax2.set_title('FFT (Frequency Domain)')
+ax2.set_title('FFT Comparison')
 ax2.set_xlim(0, 500) # limit for visibility
+ax2.legend()
 ax2.grid(True)
 
 plt.tight_layout()
