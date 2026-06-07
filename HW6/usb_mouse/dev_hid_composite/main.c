@@ -26,11 +26,25 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #include "bsp/board_api.h"
 #include "tusb.h"
 
 #include "usb_descriptors.h"
+#include "hardware/i2c.h"
+#include "hardware/gpio.h"
+
+#define I2C_SDA_PIN 4
+#define I2C_SCL_PIN 5
+#define MODE_LED_PIN 14
+#define BUTTON_PIN 15
+
+#define MPU6050_ADDR 0x68
+#define ACCEL_CONFIG 0x1C
+#define GYRO_CONFIG  0x1B
+#define PWR_MGMT_1   0x6B
+#define ACCEL_XOUT_H 0x3B
 
 //--------------------------------------------------------------------+
 // MACRO CONSTANT TYPEDEF PROTYPES
@@ -49,13 +63,48 @@ enum  {
 
 static uint32_t blink_interval_ms = BLINK_NOT_MOUNTED;
 
+// state variables
+static int current_mode = 0; 
+static bool button_last_state = true;
+static double angle = 0.0;
+
 void led_blinking_task(void);
 void hid_task(void);
+
+// IMU helpers
+void mpu6050_write_reg(uint8_t reg, uint8_t data) {
+    uint8_t buf[2] = {reg, data};
+    i2c_write_blocking(i2c_default, MPU6050_ADDR, buf, 2, false);
+}
+
+void mpu6050_read_reg(uint8_t reg, uint8_t *buf, uint16_t len) {
+    i2c_write_blocking(i2c_default, MPU6050_ADDR, &reg, 1, true);
+    i2c_read_blocking(i2c_default, MPU6050_ADDR, buf, len, false);
+}
+
+void mpu6050_setup() {
+    mpu6050_write_reg(PWR_MGMT_1, 0x00);
+    mpu6050_write_reg(ACCEL_CONFIG, 0x00);
+    mpu6050_write_reg(GYRO_CONFIG, 0x18);
+}
 
 /*------------- MAIN -------------*/
 int main(void)
 {
   board_init();
+
+  // init hardware
+  i2c_init(i2c_default, 400 * 1000);
+  gpio_set_function(I2C_SDA_PIN, GPIO_FUNC_I2C);
+  gpio_set_function(I2C_SCL_PIN, GPIO_FUNC_I2C);
+  mpu6050_setup();
+
+  gpio_init(BUTTON_PIN);
+  gpio_set_dir(BUTTON_PIN, GPIO_IN);
+  gpio_pull_up(BUTTON_PIN);
+
+  gpio_init(MODE_LED_PIN);
+  gpio_set_dir(MODE_LED_PIN, GPIO_OUT);
 
   // init device stack on configured roothub port
   tud_init(BOARD_TUD_RHPORT);
@@ -138,10 +187,40 @@ static void send_hid_report(uint8_t report_id, uint32_t btn)
 
     case REPORT_ID_MOUSE:
     {
-      int8_t const delta = 5;
+      int8_t deltax = 0;
+      int8_t deltay = 0;
 
-      // no button, right + down, no scroll, no pan
-      tud_hid_mouse_report(REPORT_ID_MOUSE, 0x00, delta, delta, 0, 0);
+      if (current_mode == 0) {
+          // Reg mode: IMU Controlled
+          uint8_t buffer[4];
+          mpu6050_read_reg(ACCEL_XOUT_H, buffer, 4);
+          int16_t accel_x = (buffer[0] << 8) | buffer[1];
+          int16_t accel_y = (buffer[2] << 8) | buffer[3];
+          
+          float ax_g = accel_x * 0.000061f;
+          float ay_g = accel_y * 0.000061f;
+
+          // discretize x-axis 
+          if (ax_g > 0.4f) deltax = -5;
+          else if (ax_g > 0.15f) deltax = -2;
+          else if (ax_g < -0.4f) deltax = 5;
+          else if (ax_g < -0.15f) deltax = 2;
+
+          // discretize y-axis
+          if (ay_g > 0.4f) deltay = 5;
+          else if (ay_g > 0.15f) deltay = 2;
+          else if (ay_g < -0.4f) deltay = -5;
+          else if (ay_g < -0.15f) deltay = -2;
+      } 
+      else {
+          // remote mode: circle
+          deltax = (int8_t)(4.0 * cos(angle));
+          deltay = (int8_t)(4.0 * sin(angle));
+          angle += 0.1;
+          if (angle > 6.28) angle = 0.0;
+      }
+
+      tud_hid_mouse_report(REPORT_ID_MOUSE, 0x00, deltax, deltay, 0, 0);
     }
     break;
 
@@ -206,6 +285,14 @@ void hid_task(void)
   const uint32_t interval_ms = 10;
   static uint32_t start_ms = 0;
 
+  // button debounce and mode switch
+  bool button_current_state = gpio_get(BUTTON_PIN);
+  if (!button_current_state && button_last_state) {
+      current_mode = !current_mode;
+      gpio_put(MODE_LED_PIN, current_mode);
+  }
+  button_last_state = button_current_state;
+
   if ( board_millis() - start_ms < interval_ms) return; // not enough time
   start_ms += interval_ms;
 
@@ -220,7 +307,7 @@ void hid_task(void)
   }else
   {
     // Send the 1st of report chain, the rest will be sent by tud_hid_report_complete_cb()
-    send_hid_report(REPORT_ID_KEYBOARD, btn);
+    send_hid_report(REPORT_ID_MOUSE, btn);
   }
 }
 
