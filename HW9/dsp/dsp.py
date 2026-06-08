@@ -51,25 +51,40 @@ for i in range(X - 1, num_points):
 Y_maf = np.fft.fft(maf_signal) / num_points
 Y_maf = Y_maf[range(int(num_points / 2))]
 
+# infinite impulse response (IIR) filter implementation
+A = 0.80 # weight for past avg (guess aand check value for each CSV)
+B = 1.0 - A
+
+iir_signal = np.zeros(num_points)
+iir_signal[0] = signal[0] # seed first value
+
+# IIR Loop
+for i in range(1, num_points):
+    iir_signal[i] = A * iir_signal[i-1] + B * signal[i]
+
+# calc FFT for new filtered signal
+Y_iir = np.fft.fft(iir_signal) / num_points
+Y_iir = Y_iir[range(int(num_points / 2))]
+
 # plotting both subplots
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
 # signal v time plot
 ax1.plot(t, signal, 'k', label='Unfiltered Signal')
-ax1.plot(t, maf_signal, 'r', label='Filtered Signal')
+ax1.plot(t, iir_signal, 'r', label='Filtered Signal')
 ax1.set_xlabel('Time [s]')
 ax1.set_ylabel('Amplitude')
-ax1.set_title(f'MAF Filter ({filename}) - Window: {X}')
+ax1.set_title(f'IIR Filter ({filename}) - A: {A:.2f}, B: {B:.2f}')
 ax1.legend()
 ax1.grid(True)
 
 # FFT plot
 ax2.plot(frq, abs(Y), 'k', label='Unfiltered FFT') 
-ax2.plot(frq, abs(Y_maf), 'r', label='Filtered FFT')
+ax2.plot(frq, abs(Y_iir), 'r', label='Filtered FFT')
 ax2.set_xlabel('Freq (Hz)')
 ax2.set_ylabel('|Y(freq)|')
 ax2.set_title('FFT Comparison')
-ax2.set_xlim(0, 500) # limit for visibility
+ax2.set_xlim(0, max(frq)/4) # limit for visibility
 ax2.legend()
 ax2.grid(True)
 
